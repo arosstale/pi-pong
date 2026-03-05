@@ -334,6 +334,10 @@ function tickBreakout(s: BreakoutState) {
 
     // Write back
     if (b.main) { s.ballX = b.x; s.ballY = b.y; s.bvx = b.vx; s.bvy = b.vy; }
+    else {
+      const mi = balls.indexOf(b) - 1; // offset by main ball
+      if (mi >= 0 && mi < s.multi.length) { s.multi[mi].x = b.x; s.multi[mi].y = b.y; s.multi[mi].vx = b.vx; s.multi[mi].vy = b.vy; }
+    }
   }
 
   // Update multi balls

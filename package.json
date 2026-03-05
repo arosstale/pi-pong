@@ -1,6 +1,6 @@
 {
   "name": "@artale/pi-pong",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Terminal Pong + Breakout for pi — vs AI with difficulty scaling, ball trails, and power-ups",
   "pi-extension": "extensions/pi-pong.ts",
   "keywords": ["pi-extension", "game", "pong", "terminal", "arcade"],
