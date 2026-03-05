@@ -226,6 +226,250 @@ class PongComponent {
   dispose() { if (this.timer) { clearInterval(this.timer); this.timer = null; } }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// BREAKOUT — brick breaker with powerups
+// ═══════════════════════════════════════════════════════════════════════════
+
+const BK_W = 40, BK_H = 24, BK_COLS = 10, BK_ROWS = 6, BK_BRICK_W = 4;
+const BRICK_COLORS = ["31", "33", "32", "36", "34", "35"]; // row colors
+
+interface Brick { alive: boolean; color: string; hits: number }
+interface BreakoutState {
+  bricks: Brick[][];
+  ballX: number; ballY: number; bvx: number; bvy: number;
+  padX: number; padW: number;
+  score: number; lives: number; level: number;
+  gameOver: boolean; won: boolean;
+  theme: number;
+  trails: { x: number; y: number; age: number }[];
+  // powerups
+  powers: { x: number; y: number; type: string; vy: number }[];
+  sticky: number; // ticks ball sticks to paddle
+  wide: number;   // ticks paddle is wide
+  multi: { x: number; y: number; vx: number; vy: number }[]; // extra balls
+}
+
+function createBricks(level: number): Brick[][] {
+  const rows = Math.min(BK_ROWS + Math.floor(level / 2), 10);
+  return Array.from({ length: rows }, (_, r) =>
+    Array.from({ length: BK_COLS }, () => ({
+      alive: true, color: BRICK_COLORS[r % BRICK_COLORS.length],
+      hits: level > 3 && r < 2 ? 2 : 1, // top rows take 2 hits at higher levels
+    }))
+  );
+}
+
+function createBreakout(level = 1): BreakoutState {
+  return {
+    bricks: createBricks(level),
+    ballX: BK_W / 2, ballY: BK_H - 3, bvx: 0.8, bvy: -0.8,
+    padX: BK_W / 2, padW: 6,
+    score: 0, lives: 3, level, gameOver: false, won: false,
+    theme: 0, trails: [], powers: [], sticky: 30, wide: 0, multi: [],
+  };
+}
+
+function tickBreakout(s: BreakoutState) {
+  if (s.gameOver) return;
+  if (s.sticky > 0) { s.sticky--; s.ballX = s.padX; s.ballY = BK_H - 3; return; }
+
+  // Powerup effects
+  if (s.wide > 0) { s.wide--; s.padW = 10; } else { s.padW = 6; }
+
+  // Trail
+  s.trails.push({ x: s.ballX, y: s.ballY, age: 0 });
+  if (s.trails.length > 8) s.trails.shift();
+  for (const t of s.trails) t.age++;
+
+  // Move ball
+  const balls = [{ x: s.ballX, y: s.ballY, vx: s.bvx, vy: s.bvy, main: true }, ...s.multi.map(m => ({ ...m, main: false }))];
+
+  for (const b of balls) {
+    b.x += b.vx; b.y += b.vy;
+
+    // Wall bounce
+    if (b.x <= 0) { b.x = 0; b.vx = Math.abs(b.vx); }
+    if (b.x >= BK_W - 1) { b.x = BK_W - 1; b.vx = -Math.abs(b.vx); }
+    if (b.y <= 0) { b.y = 0; b.vy = Math.abs(b.vy); }
+
+    // Paddle bounce
+    if (b.y >= BK_H - 2 && b.vy > 0) {
+      if (Math.abs(b.x - s.padX) < s.padW / 2 + 0.5) {
+        b.vy = -Math.abs(b.vy);
+        b.vx += (b.x - s.padX) * 0.15; // angle control
+        b.y = BK_H - 3;
+      }
+    }
+
+    // Brick collision
+    const brickH = 1;
+    for (let r = 0; r < s.bricks.length; r++) {
+      for (let c = 0; c < BK_COLS; c++) {
+        const br = s.bricks[r][c];
+        if (!br.alive) continue;
+        const bx = c * BK_BRICK_W, by = r * brickH + 2;
+        if (b.x >= bx && b.x < bx + BK_BRICK_W && b.y >= by && b.y < by + brickH) {
+          br.hits--;
+          if (br.hits <= 0) {
+            br.alive = false;
+            s.score += 10 * s.level;
+            // Random powerup (15% chance)
+            if (Math.random() < 0.15) {
+              const types = ["wide", "life", "multi", "slow"];
+              s.powers.push({ x: bx + BK_BRICK_W / 2, y: by, type: types[Math.floor(Math.random() * types.length)], vy: 0.5 });
+            }
+          }
+          b.vy = -b.vy;
+        }
+      }
+    }
+
+    // Ball lost
+    if (b.y > BK_H && b.main) {
+      s.lives--;
+      if (s.lives <= 0) { s.gameOver = true; return; }
+      s.sticky = 30;
+      s.multi = [];
+    }
+
+    // Write back
+    if (b.main) { s.ballX = b.x; s.ballY = b.y; s.bvx = b.vx; s.bvy = b.vy; }
+  }
+
+  // Update multi balls
+  s.multi = s.multi.filter(m => m.y <= BK_H);
+
+  // Powerup fall + collect
+  for (let i = s.powers.length - 1; i >= 0; i--) {
+    const p = s.powers[i]; p.y += p.vy;
+    if (p.y > BK_H) { s.powers.splice(i, 1); continue; }
+    if (p.y >= BK_H - 2 && Math.abs(p.x - s.padX) < s.padW / 2 + 1) {
+      s.powers.splice(i, 1);
+      if (p.type === "wide") s.wide = 120;
+      else if (p.type === "life") s.lives = Math.min(5, s.lives + 1);
+      else if (p.type === "multi") {
+        s.multi.push({ x: s.ballX, y: s.ballY, vx: s.bvx + 0.3, vy: s.bvy });
+        s.multi.push({ x: s.ballX, y: s.ballY, vx: s.bvx - 0.3, vy: s.bvy });
+      } else if (p.type === "slow") { s.bvx *= 0.7; s.bvy *= 0.7; }
+      s.score += 25;
+    }
+  }
+
+  // Check win
+  if (s.bricks.every(row => row.every(b => !b.alive))) {
+    s.level++;
+    s.bricks = createBricks(s.level);
+    s.sticky = 30;
+    s.multi = [];
+    const speed = Math.min(1.5, 0.8 + s.level * 0.08);
+    s.bvx = speed * Math.sign(s.bvx || 1);
+    s.bvy = -speed;
+  }
+}
+
+class BreakoutComponent {
+  private s: BreakoutState;
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private paused = false;
+  private version = 0;
+
+  constructor(private tui: any, private done: (v: undefined) => void) {
+    this.s = createBreakout();
+    this.timer = setInterval(() => {
+      if (!this.paused) { tickBreakout(this.s); this.version++; this.tui.requestRender(); }
+    }, 33);
+  }
+
+  handleInput(data: string) {
+    if (data === "q" || data === "Q" || data === "\x03") { this.dispose(); this.done(undefined); return; }
+    if (data === "\x1b" || data === "p" || data === "P") { this.paused = !this.paused; this.version++; this.tui.requestRender(); return; }
+    if (this.paused) { this.paused = false; return; }
+    if (this.s.gameOver && (data === "r" || data === "R")) { this.s = createBreakout(); this.version++; this.tui.requestRender(); return; }
+    if (data === "t" || data === "T") { this.s.theme = (this.s.theme + 1) % THEMES.length; this.version++; this.tui.requestRender(); }
+    if (data === "\x1b[D" || data === "a" || data === "A") { this.s.padX = Math.max(this.s.padW / 2, this.s.padX - 2); this.version++; this.tui.requestRender(); }
+    if (data === "\x1b[C" || data === "d" || data === "D") { this.s.padX = Math.min(BK_W - this.s.padW / 2, this.s.padX + 2); this.version++; this.tui.requestRender(); }
+    if (data === " " && this.s.sticky > 0) { this.s.sticky = 0; } // launch ball
+  }
+
+  invalidate() {}
+
+  render(width: number): string[] {
+    const th = THEMES[this.s.theme];
+    const lines: string[] = [];
+    const totalW = BK_W * 2;
+
+    // Build grid
+    const grid: string[][] = Array.from({ length: BK_H }, () => Array(BK_W).fill("  "));
+
+    // Bricks
+    for (let r = 0; r < this.s.bricks.length; r++) {
+      for (let c = 0; c < BK_COLS; c++) {
+        const br = this.s.bricks[r][c];
+        if (!br.alive) continue;
+        const ch = br.hits > 1 ? "▓▓" : "██";
+        for (let dx = 0; dx < BK_BRICK_W; dx++) {
+          const x = c * BK_BRICK_W + dx, y = r + 2;
+          if (x < BK_W && y < BK_H) grid[y][x] = `\x1b[${br.color}m${ch}${RST}`;
+        }
+      }
+    }
+
+    // Powerups falling
+    const pwChar: Record<string, string> = { wide: `\x1b[33m◆ ${RST}`, life: `\x1b[31m♥ ${RST}`, multi: `\x1b[36m✦ ${RST}`, slow: `\x1b[32m▼ ${RST}` };
+    for (const p of this.s.powers) {
+      const px = Math.round(p.x), py = Math.round(p.y);
+      if (px >= 0 && px < BK_W && py >= 0 && py < BK_H) grid[py][px] = pwChar[p.type] || "? ";
+    }
+
+    // Trails
+    for (const t of this.s.trails) {
+      const tx = Math.round(t.x), ty = Math.round(t.y);
+      if (tx >= 0 && tx < BK_W && ty >= 0 && ty < BK_H && t.age < 6)
+        grid[ty][tx] = `\x1b[${th.trail}m░░${RST}`;
+    }
+
+    // Paddle
+    const padLeft = Math.max(0, Math.round(this.s.padX - this.s.padW / 2));
+    for (let dx = 0; dx < this.s.padW && padLeft + dx < BK_W; dx++) {
+      grid[BK_H - 1][padLeft + dx] = `\x1b[${th.p1};1m▀▀${RST}`;
+    }
+
+    // Ball
+    const bx = Math.round(this.s.ballX), by = Math.round(this.s.ballY);
+    if (bx >= 0 && bx < BK_W && by >= 0 && by < BK_H) grid[by][bx] = `\x1b[${th.ball};1m██${RST}`;
+    // Multi balls
+    for (const m of this.s.multi) {
+      const mx = Math.round(m.x), my = Math.round(m.y);
+      if (mx >= 0 && mx < BK_W && my >= 0 && my < BK_H) grid[my][mx] = `\x1b[${th.ball}m▪▪${RST}`;
+    }
+
+    // Header
+    lines.push(dim(` ╭${"─".repeat(totalW + 2)}╮`));
+    const hdr = ` ${bold(yellow("BREAKOUT"))} │ Score ${yellow(String(this.s.score))} │ Lv ${cyan(String(this.s.level))} │ ${"♥".repeat(this.s.lives)}${dim("♡".repeat(5 - this.s.lives))} │ ${dim(THEMES[this.s.theme].name)}`;
+    const hVis = visibleWidth(hdr);
+    lines.push(dim(" │") + hdr + " ".repeat(Math.max(0, totalW + 2 - hVis)) + dim("│"));
+    lines.push(dim(` ├${"─".repeat(totalW + 2)}┤`));
+
+    for (let y = 0; y < BK_H; y++) {
+      lines.push(dim(" │ ") + grid[y].join("") + dim(" │"));
+    }
+
+    lines.push(dim(` ├${"─".repeat(totalW + 2)}┤`));
+    let footer: string;
+    if (this.paused) footer = `${yellow(bold("PAUSED"))}`;
+    else if (this.s.gameOver) footer = `${red(bold("GAME OVER"))} Score: ${this.s.score} — ${bold("R")} restart  ${bold("Q")} quit`;
+    else if (this.s.sticky > 0) footer = `${bold("SPACE")} to launch — ←→/AD move`;
+    else footer = `←→/AD move  T=theme  P=pause  Q=quit`;
+    const fVis = visibleWidth(footer);
+    lines.push(dim(" │") + ` ${footer}` + " ".repeat(Math.max(0, totalW + 1 - fVis)) + dim("│"));
+    lines.push(dim(` ╰${"─".repeat(totalW + 2)}╯`));
+
+    return lines.map(l => l + " ".repeat(Math.max(0, width - visibleWidth(l))));
+  }
+
+  dispose() { if (this.timer) { clearInterval(this.timer); this.timer = null; } }
+}
+
 export default function (pi: ExtensionAPI) {
   pi.registerCommand("pong", {
     description: "Play Pong vs AI. /pong [easy|hard]. ↑↓/WS=move, T=theme, P=pause.",
@@ -234,6 +478,14 @@ export default function (pi: ExtensionAPI) {
       const arg = (args || "").trim().toLowerCase();
       const diff = arg === "easy" ? 0.3 : arg === "hard" ? 0.9 : 0.6;
       await ctx.ui.custom((tui: any, _t: any, _k: any, done: (v: undefined) => void) => new PongComponent(tui, done, diff));
+    },
+  });
+
+  pi.registerCommand("breakout", {
+    description: "Play Breakout! Brick breaker with powerups. ←→/AD=move, SPACE=launch, T=theme.",
+    handler: async (_args, ctx) => {
+      if (!ctx.hasUI) { ctx.ui.notify("Breakout requires interactive mode", "error"); return; }
+      await ctx.ui.custom((tui: any, _t: any, _k: any, done: (v: undefined) => void) => new BreakoutComponent(tui, done));
     },
   });
 }
