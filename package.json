@@ -1,0 +1,10 @@
+{
+  "name": "pi-pong",
+  "version": "1.0.0",
+  "description": "Terminal Pong for pi — vs AI with difficulty scaling, ball trails, and power-ups",
+  "pi-extension": "extensions/pi-pong.ts",
+  "keywords": ["pi-extension", "game", "pong", "terminal", "arcade"],
+  "author": "artale",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/arosstale/pi-pong.git" }
+}
