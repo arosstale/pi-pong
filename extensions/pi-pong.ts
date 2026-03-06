@@ -3,6 +3,23 @@
  */
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { visibleWidth } from "@mariozechner/pi-tui";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
+
+const SAVE_DIR = join(homedir(), ".pi", "pong");
+const SAVE_FILE = join(SAVE_DIR, "save.json");
+
+interface SaveData { pongBestRally: number; breakoutHighScore: number }
+
+function loadSave(): SaveData {
+  try { if (existsSync(SAVE_FILE)) return JSON.parse(readFileSync(SAVE_FILE, "utf-8")); } catch {}
+  return { pongBestRally: 0, breakoutHighScore: 0 };
+}
+
+function saveSave(d: SaveData) {
+  try { mkdirSync(SAVE_DIR, { recursive: true }); writeFileSync(SAVE_FILE, JSON.stringify(d)); } catch {}
+}
 
 const PADDLE_H = 5;
 const BALL_SPEED = 1.2;
@@ -118,11 +135,19 @@ class PongComponent {
   private timer: ReturnType<typeof setInterval> | null = null;
   private paused = false;
   private version = 0;
+  private save: SaveData;
 
   constructor(private tui: any, private done: (v: undefined) => void, difficulty: number) {
+    this.save = loadSave();
     this.s = createPong(60, 20, difficulty);
     this.timer = setInterval(() => {
-      if (!this.paused) { tickPong(this.s); this.version++; this.tui.requestRender(); }
+      if (!this.paused) {
+        tickPong(this.s);
+        if (this.s.maxRally > this.save.pongBestRally) {
+          this.save.pongBestRally = this.s.maxRally; saveSave(this.save);
+        }
+        this.version++; this.tui.requestRender();
+      }
     }, 33);
   }
 
@@ -151,7 +176,8 @@ class PongComponent {
 
     // Score header
     lines.push(dim(` ╭${"─".repeat(totalW)}╮`));
-    const scoreStr = ` ${bold(cyan("PONG"))} │ ${green(String(this.s.score1))} : ${red(String(this.s.score2))} │ Rally: ${yellow(String(this.s.rallies))} │ Best: ${yellow(String(this.s.maxRally))} │ ${dim(THEMES[this.s.theme].name)}`;
+    const allTimeBest = Math.max(this.s.maxRally, this.save.pongBestRally);
+    const scoreStr = ` ${bold(cyan("PONG"))} │ ${green(String(this.s.score1))} : ${red(String(this.s.score2))} │ Rally: ${yellow(String(this.s.rallies))} │ Best: ${yellow(String(allTimeBest))} │ ${dim(THEMES[this.s.theme].name)}`;
     const sVis = visibleWidth(scoreStr);
     lines.push(dim(" │") + scoreStr + " ".repeat(Math.max(0, totalW - sVis)) + dim("│"));
     lines.push(dim(` ├${"─".repeat(totalW)}┤`));
@@ -376,11 +402,19 @@ class BreakoutComponent {
   private timer: ReturnType<typeof setInterval> | null = null;
   private paused = false;
   private version = 0;
+  private save: SaveData;
 
   constructor(private tui: any, private done: (v: undefined) => void) {
+    this.save = loadSave();
     this.s = createBreakout();
     this.timer = setInterval(() => {
-      if (!this.paused) { tickBreakout(this.s); this.version++; this.tui.requestRender(); }
+      if (!this.paused) {
+        tickBreakout(this.s);
+        if (this.s.score > this.save.breakoutHighScore) {
+          this.save.breakoutHighScore = this.s.score; saveSave(this.save);
+        }
+        this.version++; this.tui.requestRender();
+      }
     }, 33);
   }
 
@@ -449,7 +483,8 @@ class BreakoutComponent {
 
     // Header
     lines.push(dim(` ╭${"─".repeat(totalW + 2)}╮`));
-    const hdr = ` ${bold(yellow("BREAKOUT"))} │ Score ${yellow(String(this.s.score))} │ Lv ${cyan(String(this.s.level))} │ ${"♥".repeat(this.s.lives)}${dim("♡".repeat(5 - this.s.lives))} │ ${dim(THEMES[this.s.theme].name)}`;
+    const best = Math.max(this.s.score, this.save.breakoutHighScore);
+    const hdr = ` ${bold(yellow("BREAKOUT"))} │ Score ${yellow(String(this.s.score))} │ Hi ${yellow(String(best))} │ Lv ${cyan(String(this.s.level))} │ ${"♥".repeat(this.s.lives)}${dim("♡".repeat(5 - this.s.lives))} │ ${dim(THEMES[this.s.theme].name)}`;
     const hVis = visibleWidth(hdr);
     lines.push(dim(" │") + hdr + " ".repeat(Math.max(0, totalW + 2 - hVis)) + dim("│"));
     lines.push(dim(` ├${"─".repeat(totalW + 2)}┤`));
